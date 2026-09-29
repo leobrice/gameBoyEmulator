@@ -1,0 +1,7 @@
+build/
+gameboy
+tests/catch.gb
+*.o
+*.d
+*.sav
+*.ppm
