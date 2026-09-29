@@ -1,6 +1,6 @@
 build/
 gameboy
-tests/catch.gb
+tests/snake.gb
 *.o
 *.d
 *.sav

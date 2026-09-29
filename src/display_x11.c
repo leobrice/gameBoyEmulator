@@ -35,7 +35,7 @@ static u8 key_to_button(KeySym k)
 	case XK_Right:     return BTN_RIGHT;
 	case XK_z: case XK_Z: return BTN_A;
 	case XK_x: case XK_X: return BTN_B;
-	case XK_Return:    return BTN_START;
+	case XK_Return: case XK_space: return BTN_START;
 	case XK_BackSpace: case XK_Shift_R: return BTN_SELECT;
 	}
 	return 0;

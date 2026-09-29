@@ -1,9 +1,9 @@
-/* playtest.c -- drives the built-in game the way a player would
+/* playtest.c -- plays the built-in snake game with nobody at the keyboard
  *
- * Reads the sprite positions straight out of work ram, steers the player at
- * the target, and checks that the score on screen goes up.  If this passes,
- * the cpu, the ppu, oam dma, the joypad and the game all agree with each
- * other, which is most of the emulator in one test.
+ * Reads the snake's head and the food straight out of work ram, steers at the
+ * food, then drives the snake into a wall and restarts it.  If this passes,
+ * the cpu, the ppu, oam dma and the joypad all agree with each other, which is
+ * most of the emulator in one test.
  */
 #include "../src/gb.h"
 #include "../src/cart.h"
@@ -11,36 +11,102 @@
 #include "../src/joypad.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 
-#define OAM_SHADOW  0x0000      /* $c000, as an offset into wram */
-#define SCORE_ONES  0x0101
-#define MAP_ONES    0x180A      /* $980a, as an offset into vram */
-#define TILE_DIGIT  2
+/* work ram offsets, matching the defines in tools/mkrom.c */
+#define HEAD_COL   0x00
+#define HEAD_ROW   0x01
+#define DIR        0x02
+#define DEAD       0x05
+#define SCORE_ONES 0x09
+#define FOOD_COL   0x0C
+#define FOOD_ROW   0x0D
 
-#define TARGET_SCORE 5
-#define MAX_FRAMES   4000
+#define MAP(r, c)  gb.ppu.vram[0x1800 + (r) * 32 + (c)]
+#define TILE_BLANK 0
+#define TILE_DIGIT 2
+#define TILE_G     17
+#define TILE_FOOD  23
+
+#define WANTED 5
 
 static struct gb gb;
 
-static u8 steer(u8 py, u8 px, u8 ty, u8 tx)
+/* can the head move onto this cell without dying?  the map is the game state,
+   so the same tiles the rom tests are the ones we look at */
+static int walkable(int col, int row)
 {
-	u8 keys = 0;
+	u8 tile;
 
-	if (ty > py + 1)      keys |= BTN_DOWN;
-	else if (ty + 1 < py) keys |= BTN_UP;
+	if (col < 1 || col > 18 || row < 2 || row > 16)
+		return 0;
+	tile = MAP(row, col);
+	return tile == TILE_BLANK || tile == TILE_FOOD;
+}
 
-	if (tx > px + 1)      keys |= BTN_RIGHT;
-	else if (tx + 1 < px) keys |= BTN_LEFT;
+/* 0 right, 1 left, 2 up, 3 down */
+static int leads_somewhere(u8 dir)
+{
+	int col = gb.wram[HEAD_COL];
+	int row = gb.wram[HEAD_ROW];
 
-	return keys;
+	switch (dir) {
+	case 0:  col++; break;
+	case 1:  col--; break;
+	case 2:  row--; break;
+	default: row++; break;
+	}
+	return walkable(col, row);
+}
+
+/* head for the food, but never into a wall or our own tail, and never a
+   straight reversal because the game refuses those anyway */
+static u8 steer(void)
+{
+	u8  hc = gb.wram[HEAD_COL], hr = gb.wram[HEAD_ROW];
+	u8  fc = gb.wram[FOOD_COL], fr = gb.wram[FOOD_ROW];
+	u8  dir = gb.wram[DIR];
+	u8  cand[4];
+	int n = 0, i, d;
+
+	if (fc > hc)      cand[n++] = 0;
+	else if (fc < hc) cand[n++] = 1;
+	if (fr > hr)      cand[n++] = 3;
+	else if (fr < hr) cand[n++] = 2;
+
+	for (d = 0; d < 4; d++) {          /* then anything else that is safe */
+		for (i = 0; i < n; i++)
+			if (cand[i] == d)
+				break;
+		if (i == n)
+			cand[n++] = (u8)d;
+	}
+
+	for (i = 0; i < n; i++)
+		if (cand[i] != (dir ^ 1) && leads_somewhere(cand[i]))
+			return cand[i];
+	return dir;
+}
+
+static u8 button(u8 dir)
+{
+	switch (dir) {
+	case 0:  return BTN_RIGHT;
+	case 1:  return BTN_LEFT;
+	case 2:  return BTN_UP;
+	default: return BTN_DOWN;
+	}
+}
+
+static void frame(u8 keys)
+{
+	joypad_set(&gb, keys);
+	gb_run_frame(&gb);
 }
 
 int main(void)
 {
-	int frame;
-	int caught = 0;
-	u8  last_score = 0;
+	int frames, eaten = 0;
+	u8  last = 0;
 
 	gb_init(&gb);
 	gb.serial_stdout = false;
@@ -51,60 +117,73 @@ int main(void)
 	}
 	gb_reset(&gb);
 
-	for (frame = 0; frame < MAX_FRAMES; frame++) {
-		u8 py = gb.wram[OAM_SHADOW + 0];
-		u8 px = gb.wram[OAM_SHADOW + 1];
-		u8 ty = gb.wram[OAM_SHADOW + 4];
-		u8 tx = gb.wram[OAM_SHADOW + 5];
-		u8 score;
-
-		joypad_set(&gb, frame > 60 ? steer(py, px, ty, tx) : 0);
-		gb_run_frame(&gb);
+	/* let it boot, then play */
+	for (frames = 0; frames < 6000 && eaten < WANTED; frames++) {
+		frame(frames < 30 ? 0 : button(steer()));
 
 		if (gb.cpu.stopped) {
-			printf("FAIL: the cpu stopped at frame %d\n", frame);
+			printf("FAIL: the cpu stopped at frame %d\n", frames);
 			return 1;
 		}
-
-		score = gb.wram[SCORE_ONES];
-		if (score != last_score) {
-			caught++;
-			last_score = score;
+		if (gb.wram[DEAD]) {
+			printf("FAIL: died after eating %d, at %u,%u\n",
+			       eaten, gb.wram[HEAD_COL], gb.wram[HEAD_ROW]);
+			return 1;
 		}
-		if (caught >= TARGET_SCORE)
-			break;
+		if (gb.wram[SCORE_ONES] != last) {
+			last = gb.wram[SCORE_ONES];
+			eaten++;
+		}
 	}
 
-	if (caught < TARGET_SCORE) {
-		printf("FAIL: caught %d of %d targets in %d frames\n",
-		       caught, TARGET_SCORE, frame);
-		printf("      player at %u,%u  target at %u,%u\n",
-		       gb.wram[OAM_SHADOW + 1], gb.wram[OAM_SHADOW + 0],
-		       gb.wram[OAM_SHADOW + 5], gb.wram[OAM_SHADOW + 4]);
+	if (eaten < WANTED) {
+		printf("FAIL: ate %d of %d in %d frames\n", eaten, WANTED, frames);
 		return 1;
 	}
-	printf("ok   caught %d targets in %d frames\n", caught, frame);
+	printf("ok   ate %d food in %d frames\n", eaten, frames);
 
-	/* the game draws the score at the top of a frame, so the newest catch is
-	   still one frame away from the screen */
-	joypad_set(&gb, 0);
-	gb_run_frame(&gb);
-
-	/* the score has to have reached the screen, not just work ram */
-	if (gb.ppu.vram[MAP_ONES] != TILE_DIGIT + gb.wram[SCORE_ONES]) {
+	/* the score has to reach the screen, one frame behind the catch */
+	frame(0);
+	if (MAP(0, 10) != TILE_DIGIT + gb.wram[SCORE_ONES]) {
 		printf("FAIL: score tile is %u, expected %u\n",
-		       gb.ppu.vram[MAP_ONES], TILE_DIGIT + gb.wram[SCORE_ONES]);
+		       MAP(0, 10), TILE_DIGIT + gb.wram[SCORE_ONES]);
 		return 1;
 	}
 	printf("ok   score %u drawn to the background map\n", gb.wram[SCORE_ONES]);
 
-	/* the sprites must have been dma'd into real oam */
-	if (gb.ppu.oam[0] != gb.wram[OAM_SHADOW + 0] ||
-	    gb.ppu.oam[1] != gb.wram[OAM_SHADOW + 1]) {
-		printf("FAIL: oam dma did not copy the player sprite\n");
+	/* the head is the only sprite, and it gets there by dma */
+	if (gb.ppu.oam[0] != gb.wram[HEAD_ROW] * 8 + 16 ||
+	    gb.ppu.oam[1] != gb.wram[HEAD_COL] * 8 + 8) {
+		printf("FAIL: head sprite at %u,%u, expected %u,%u\n",
+		       gb.ppu.oam[1], gb.ppu.oam[0],
+		       gb.wram[HEAD_COL] * 8 + 8, gb.wram[HEAD_ROW] * 8 + 16);
 		return 1;
 	}
-	printf("ok   oam dma copied the sprites\n");
+	printf("ok   oam dma put the head sprite where the snake is\n");
+
+	/* now crash on purpose: hold one direction until a wall turns up */
+	for (frames = 0; frames < 400 && !gb.wram[DEAD]; frames++)
+		frame(BTN_UP);
+
+	if (!gb.wram[DEAD]) {
+		printf("FAIL: the snake never hit anything\n");
+		return 1;
+	}
+	if (MAP(9, 5) != TILE_G) {
+		printf("FAIL: game over was not drawn (tile %u)\n", MAP(9, 5));
+		return 1;
+	}
+	printf("ok   collision killed it and drew game over\n");
+
+	/* start puts it back */
+	for (frames = 0; frames < 20; frames++)
+		frame(BTN_START);
+
+	if (gb.wram[DEAD] || gb.wram[SCORE_ONES] != 0 || MAP(9, 5) != TILE_BLANK) {
+		printf("FAIL: start did not restart the game\n");
+		return 1;
+	}
+	printf("ok   start began a fresh game\n");
 
 	cart_free(&gb.cart);
 	return 0;

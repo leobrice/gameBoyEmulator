@@ -15,8 +15,8 @@ static void usage(const char *argv0)
 	fprintf(stderr,
 		"usage: %s [options] [rom.gb]\n"
 		"\n"
-		"With no rom, the game built into the emulator runs: catch the\n"
-		"diamond with the d-pad, start resets the score.\n"
+		"With no rom, the snake game built into the emulator runs: turn\n"
+		"with the d-pad, eat the rings, start or space begins a new game.\n"
 		"\n"
 		"  -s, --scale N     window scale factor (default 3)\n"
 		"  -f, --frames N    stop after N frames\n"
@@ -26,7 +26,7 @@ static void usage(const char *argv0)
 		"  -q, --quiet       do not echo the serial port\n"
 		"  -h, --help        this text\n"
 		"\n"
-		"keys: arrows = d-pad, z = a, x = b, enter = start,\n"
+		"keys: arrows = d-pad, z = a, x = b, enter or space = start,\n"
 		"      backspace = select, escape = quit\n",
 		argv0);
 }

@@ -47,7 +47,9 @@ void gb_tick(struct gb *gb, int cycles)
 
 void gb_run_frame(struct gb *gb)
 {
-	u64 budget = FRAME_CYCLES * 2;   /* keeps us honest when the lcd is off */
+	/* signed on purpose: an unsigned counter wraps when the last instruction
+	   costs more than is left, and the loop never ends */
+	long budget = FRAME_CYCLES * 2;   /* keeps us honest when the lcd is off */
 
 	gb->ppu.frame_ready = false;
 
@@ -55,7 +57,7 @@ void gb_run_frame(struct gb *gb)
 		int cycles = cpu_step(gb);
 
 		gb_tick(gb, cycles);
-		budget -= (u64)cycles;
+		budget -= cycles;
 
 		if (gb->ppu.frame_ready || gb->cpu.stopped)
 			return;

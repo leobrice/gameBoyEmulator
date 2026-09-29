@@ -51,8 +51,8 @@ $(OBJDIR)/mkrom: tools/mkrom.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -o $@ $<
 
 # one run of mkrom produces both the standalone rom and the bytes we link in
-$(OBJDIR)/builtin_rom.c tests/catch.gb &: $(OBJDIR)/mkrom
-	$(OBJDIR)/mkrom tests/catch.gb $(OBJDIR)/builtin_rom.c
+$(OBJDIR)/builtin_rom.c tests/snake.gb &: $(OBJDIR)/mkrom
+	$(OBJDIR)/mkrom tests/snake.gb $(OBJDIR)/builtin_rom.c
 
 $(OBJDIR)/builtin_rom.o: $(OBJDIR)/builtin_rom.c
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -63,11 +63,11 @@ run: $(BIN)
 $(OBJDIR)/playtest: tests/playtest.c $(CORE)
 	$(CC) $(CFLAGS) -o $@ $< $(CORE)
 
-test: $(BIN) tests/catch.gb $(OBJDIR)/playtest
+test: $(BIN) tests/snake.gb $(OBJDIR)/playtest
 	@$(OBJDIR)/playtest
 	@tests/run.sh ./$(BIN)
 
 clean:
-	rm -rf $(OBJDIR) $(BIN) tests/catch.gb
+	rm -rf $(OBJDIR) $(BIN) tests/snake.gb
 
 -include $(DEPS)

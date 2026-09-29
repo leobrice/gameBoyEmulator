@@ -11,9 +11,10 @@ find before you can play:
 make && ./gameboy
 ```
 
-Steer the face around the field with the d-pad and run into the diamond. Start
-resets the score. That game is hand assembled by [tools/mkrom.c](tools/mkrom.c)
-and linked into the binary, which also makes it the emulator's own test rom.
+That's Snake. Turn with the d-pad, eat the rings, do not bite yourself or the
+wall. Enter or space begins a new game after you die. It is hand assembled by
+[tools/mkrom.c](tools/mkrom.c) and linked into the binary, which also makes it
+the emulator's own test rom.
 
 ## Build
 
@@ -44,8 +45,8 @@ null display and still runs.
 | `-t, --trace` | log CPU state every instruction |
 | `-q, --quiet` | do not echo the serial port |
 
-Keys: arrows are the d-pad, `z` is A, `x` is B, enter is start, backspace is
-select, escape quits. Cartridge RAM with a battery is saved next to the ROM as
+Keys: arrows are the d-pad, `z` is A, `x` is B, enter or space is start,
+backspace is select, escape quits. Cartridge RAM with a battery is saved next to the ROM as
 `<rom>.sav` on exit.
 
 ## How it fits together
@@ -61,7 +62,7 @@ select, escape quits. Cartridge RAM with a battery is saved next to the ROM as
 | [src/joypad.c](src/joypad.c) | FF00 |
 | [src/gb.c](src/gb.c) | the step loop that keeps the chips in sync |
 | [src/display_x11.c](src/display_x11.c) | window, palette, keyboard, frame pacing |
-| [tools/mkrom.c](tools/mkrom.c) | assembles the built-in game, byte by byte |
+| [tools/mkrom.c](tools/mkrom.c) | assembles the built-in Snake, byte by byte |
 | [tests/playtest.c](tests/playtest.c) | plays that game with no human involved |
 
 The CPU is decoded by leaning on the shape of the opcode table rather than by
@@ -76,21 +77,25 @@ Slot 6 is the `(HL)` escape hatch and reads or writes memory instead.
 
 ## The built-in game
 
-[tools/mkrom.c](tools/mkrom.c) is a 550-line program that emits a 32 KiB
-cartridge: `emit()` lays down opcodes, `jr_fwd()`/`patch()` close a forward
-branch, and every subroutine is emitted before its callers so each `call` is a
-backward reference to an address already known. Tiles are written as string art
-and converted to 2bpp planes. There is no assembler in the build on purpose —
-in a project this size you should be able to read every byte that runs.
+[tools/mkrom.c](tools/mkrom.c) emits a 32 KiB cartridge: `emit()` lays down
+opcodes, `jr_fwd()`/`patch()` close a forward branch, and every subroutine is
+emitted before its callers so each `call` is a backward reference to an address
+already known. Tiles are written as string art and converted to 2bpp planes.
+There is no assembler in the build on purpose — in a project this size you
+should be able to read every byte that runs.
 
-The ROM writes its own tile data, builds a walled field, runs OAM DMA from a
-shadow table in work RAM through a stub copied into HRAM, polls the joypad the
-way the hardware wants, and keeps a three digit score.
+The nice trick in the game is that **the snake's body lives in the background
+tile map**, which makes the map double as the collision test. Step onto a blank
+tile and you move; onto the food tile and you grow and score; onto anything
+else — wall or your own body — and you are dead. No search, no occupancy
+table. A ring buffer in work RAM remembers the body cells only so the tail
+knows which one to rub out. The head is the single sprite, which keeps OAM DMA
+in the picture.
 
 That makes it a thorough test. [tests/playtest.c](tests/playtest.c) links the
-emulator as a library, reads the sprite positions out of work RAM, steers the
-player at the target, and asserts the score reaches the screen — which exercises
-the CPU, the PPU, OAM DMA and the joypad in one go.
+emulator as a library, reads the head and the food out of work RAM, steers at
+the food while reading the same tile map the ROM does, then crashes on purpose
+and restarts — exercising the CPU, the PPU, OAM DMA and the joypad in one go.
 
 ## What it does and does not do
 
